@@ -1,4 +1,4 @@
-#CFLAGS=-O2 -Wall -g
+CFLAGS=-O3 -Wall -g -mcpu=power9
 NAME=mbw
 TARFILE=${NAME}.tar.gz
 

@@ -12,13 +12,21 @@
 #include <sys/time.h>
 #include <time.h>
 #include <string.h>
-#include <unistd.h>
+
+#if __PPC64__
+#include <altivec.h>
+#include "rte_memcpy.h"
+#endif
 
 /* how many runs to average by default */
 #define DEFAULT_NR_LOOPS 10
 
-/* we have 3 tests at the moment */
+/* we have 4 tests at the moment */
+#if __PPC64__
+#define MAX_TESTS 4
+#else
 #define MAX_TESTS 3
+#endif
 
 /* default block size for test 2, in bytes */
 #define DEFAULT_BLOCK_SIZE 262144
@@ -27,9 +35,12 @@
 #define TEST_MEMCPY 0
 #define TEST_DUMB 1
 #define TEST_MCBLOCK 2
+#if __PPC64__
+#define TEST_CUSTOM 3
+#endif
 
 /* version number */
-#define VERSION "1.4"
+#define VERSION "1.4-drc"
 
 /*
  * MBW memory bandwidth benchmark
@@ -62,6 +73,9 @@ void usage()
     printf("	-t%d: memcpy test\n", TEST_MEMCPY);
     printf("	-t%d: dumb (b[i]=a[i] style) test\n", TEST_DUMB);
     printf("	-t%d: memcpy test with fixed block size\n", TEST_MCBLOCK);
+#if __PPC64__
+    printf("	-t%d: custom memcpy test\n", TEST_CUSTOM);
+#endif
     printf("	-b <size>: block size in bytes for -t2 (default: %d)\n", DEFAULT_BLOCK_SIZE);
     printf("	-q: quiet (print statistics only)\n");
     printf("(will then use two arrays, watch out for swapping)\n");
@@ -132,6 +146,14 @@ double worker(unsigned long long asize, long *a, long *b, int type, unsigned lon
             b[t]=a[t];
         }
         gettimeofday(&endtime, NULL);
+#if __PPC64__
+    } else if(type==TEST_CUSTOM) { /* custom test */
+        /* timer starts */
+        gettimeofday(&starttime, NULL);
+        rte_memcpy(b, a, array_bytes);
+        /* timer stops */
+        gettimeofday(&endtime, NULL);
+#endif
     }
 
     te=((double)(endtime.tv_sec*1000000-starttime.tv_sec*1000000+endtime.tv_usec-starttime.tv_usec))/1000000;
@@ -160,6 +182,11 @@ void printout(double te, double mt, int type)
         case TEST_MCBLOCK:
             printf("Method: MCBLOCK\t");
             break;
+#if __PPC64__
+        case TEST_CUSTOM:
+            printf("Method: CUSTOM\t");
+            break;
+#endif
     }
     printf("Elapsed: %.5f\t", te);
     printf("MiB: %.5f\t", mt);
@@ -192,9 +219,12 @@ int main(int argc, char **argv)
     double mt=0; /* MiBytes transferred == array size in MiB */
     int quiet=0; /* suppress extra messages */
 
-    tests[0]=0;
-    tests[1]=0;
-    tests[2]=0;
+    tests[TEST_MEMCPY]=0;
+    tests[TEST_DUMB]=0;
+    tests[TEST_MCBLOCK]=0;
+#if __PPC64__
+    tests[TEST_CUSTOM]=0;
+#endif
 
     while((o=getopt(argc, argv, "haqn:t:b:")) != EOF) {
         switch(o) {
@@ -232,13 +262,24 @@ int main(int argc, char **argv)
     }
 
     /* default is to run all tests if no specific tests were requested */
-    if( (tests[0]+tests[1]+tests[2]) == 0) {
-        tests[0]=1;
-        tests[1]=1;
-        tests[2]=1;
+#if __PPC64__
+    if( (tests[TEST_MEMCPY]+tests[TEST_DUMB]+tests[TEST_MCBLOCK]+tests[TEST_CUSTOM]) == 0) {
+#else 
+    if( (tests[TEST_MEMCPY]+tests[TEST_DUMB]+tests[TEST_MCBLOCK]) == 0) {
+#endif
+        tests[TEST_MEMCPY]=1;
+        tests[TEST_DUMB]=1;
+        tests[TEST_MCBLOCK]=1;
+#if __PPC64__
+        tests[TEST_CUSTOM]=1;
+#endif
     }
 
-    if( nr_loops==0 && ((tests[0]+tests[1]+tests[2]) != 1) ) {
+#if __PPC64__
+    if( nr_loops==0 && ((tests[TEST_MEMCPY]+tests[TEST_DUMB]+tests[TEST_MCBLOCK]+tests[TEST_CUSTOM]) != 1) ) {
+#else
+    if( nr_loops==0 && ((tests[TEST_MEMCPY]+tests[TEST_DUMB]+tests[TEST_MCBLOCK]) != 1) ) {
+#endif
         printf("Error: nr_loops can be zero if only one test selected!\n");
         exit(1);
     }
@@ -268,7 +309,7 @@ int main(int argc, char **argv)
     if(!quiet) {
         printf("Long uses %d bytes. ", long_size);
         printf("Allocating 2*%lld elements = %lld bytes of memory.\n", asize, 2*asize*long_size);
-        if(tests[2]) {
+        if(tests[TEST_MCBLOCK]) {
             printf("Using %lld bytes as blocks for memcpy block copy test.\n", block_size);
         }
     }
